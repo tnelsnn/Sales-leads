@@ -1,66 +1,59 @@
-import altair as alt
-import pandas as pd
 import streamlit as st
+import pandas as pd
 
-# Show the page title and description.
-st.set_page_config(page_title="Movies dataset", page_icon="🎬")
-st.title("🎬 Movies dataset")
-st.write(
-    """
-    This app visualizes data from [The Movie Database (TMDB)](https://www.kaggle.com/datasets/tmdb/tmdb-movie-metadata).
-    It shows which movie genre performed best at the box office over the years. Just 
-    click on the widgets below to explore!
-    """
-)
+# Load the data
+df = pd.read_csv('data/googlelinks2.csv')
 
+# Load cities and states data
+cities_states_df = pd.read_csv('data/unique_locations.csv')
 
-# Load the data from a CSV. We're caching this so it doesn't reload every time the app
-# reruns (e.g. if the user interacts with the widgets).
-@st.cache_data
-def load_data():
-    df = pd.read_csv("data/movies_genres_summary.csv")
+# Function to filter data by city or state
+def filter_data(df, city=None, state=None):
+    if city:
+        # Filter by exact match of city in address
+        return df[df['address'].str.contains(fr'\b{city}\b', case=False, regex=True)]
+    elif state:
+        # Filter by exact match of state abbreviation in address
+        return df[df['address'].str.contains(fr'\b{state}\b', case=False, regex=True)]
     return df
 
+def generate_maps_link(address):
+    return f"https://www.google.com/maps?q={address}&output=embed"
 
-df = load_data()
+# Streamlit app
+st.title('Dispensary Finder')
 
-# Show a multiselect widget with the genres using `st.multiselect`.
-genres = st.multiselect(
-    "Genres",
-    df.genre.unique(),
-    ["Action", "Adventure", "Biography", "Comedy", "Drama", "Horror"],
-)
+# Sidebar for filtering options
+st.sidebar.title('Filter Options')
+filter_option = st.sidebar.selectbox('Filter by', ['City', 'State'])
 
-# Show a slider widget with the years using `st.slider`.
-years = st.slider("Years", 1986, 2006, (2000, 2016))
+# City selection dropdown
+if filter_option == 'City':
+    cities = cities_states_df['city'].unique()
+    city = st.sidebar.selectbox('Select city', cities)
+    filtered_df = filter_data(df, city=city)
+else:
+    # State selection dropdown
+    states = cities_states_df['state'].unique()
+    state = st.sidebar.selectbox('Select state', states)
+    filtered_df = filter_data(df, state=state)
 
-# Filter the dataframe based on the widget input and reshape it.
-df_filtered = df[(df["genre"].isin(genres)) & (df["year"].between(years[0], years[1]))]
-df_reshaped = df_filtered.pivot_table(
-    index="year", columns="genre", values="gross", aggfunc="sum", fill_value=0
-)
-df_reshaped = df_reshaped.sort_values(by="year", ascending=False)
-
-
-# Display the data as a table using `st.dataframe`.
-st.dataframe(
-    df_reshaped,
-    use_container_width=True,
-    column_config={"year": st.column_config.TextColumn("Year")},
-)
-
-# Display the data as an Altair chart using `st.altair_chart`.
-df_chart = pd.melt(
-    df_reshaped.reset_index(), id_vars="year", var_name="genre", value_name="gross"
-)
-chart = (
-    alt.Chart(df_chart)
-    .mark_line()
-    .encode(
-        x=alt.X("year:N", title="Year"),
-        y=alt.Y("gross:Q", title="Gross earnings ($)"),
-        color="genre:N",
-    )
-    .properties(height=320)
-)
-st.altair_chart(chart, use_container_width=True)
+# Display filtered results
+if not filtered_df.empty:
+    dispensary = st.selectbox('Choose a dispensary', filtered_df['name'].unique())
+    dispensary_details = filtered_df[filtered_df['name'] == dispensary].iloc[0]
+    
+    st.write(f"**Name:** {dispensary_details['name']}")
+    st.write(f"**Address:** {dispensary_details['address']}")
+    st.write(f"**Phone Number:** {dispensary_details['phone_number']}")
+    
+    # Generate Google Maps embed link based on selected dispensary's address
+    map_link = generate_maps_link(dispensary_details['address'])
+    
+    st.markdown(f"### Google Maps View")
+    st.components.v1.iframe(map_link, height=500)
+else:
+    if filter_option == 'City':
+        st.write(f"No dispensaries found in {city}.")
+    elif filter_option == 'State':
+        st.write(f"No dispensaries found in {state}.")
